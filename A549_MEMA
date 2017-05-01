@@ -1,0 +1,284 @@
+---
+title: "GLM_Plotting"
+author: "Chun-Han Lin"
+date: "3/7/2017"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: scroll
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r global, include = FALSE}
+suppressMessages(library(ggplot2))
+suppressMessages(library(reshape2))
+suppressMessages(library(grid))
+suppressMessages(library(gridExtra))
+suppressMessages(library(shiny))
+suppressMessages(library(BoutrosLab.plotting.general))
+suppressMessages(library(factoextra))
+load('GLM_means_A549.RData')
+load('GLM_HER2_total.RData')
+load('A549_PCA.RData')
+glm.other.means <- glm.other.means[-6]
+glm.other.means.HER2 <- glm.other.means.HER2[-6]
+
+Drug_Response <- glm.other.means
+pHER2_HER2_Status <- glm.other.means.HER2
+glm.other.means.HER22 <- subset(glm.other.means.HER2, Treatment != 'DMSO')
+DataSet <- c('Drug_Response', 'pHER2_HER2_Status')
+####
+res.pca <- prcomp(zsc.all[6:19], center=FALSE, scale=FALSE) # data already centered and scaled
+eig <- (res.pca$sdev)^2
+variance <- eig*100/sum(eig)
+cumvar <- cumsum(variance)
+####
+
+edu_min <- min(glm.other.means$`adjusted mean`)
+edu_max <- max(glm.other.means$`adjusted mean`)
+her2_min <- min(pHER2_HER2_Status$`adjusted mean`)
+her2_max <- max(pHER2_HER2_Status$`adjusted mean`)
+```
+
+```{r functions, include = FALSE}
+generatelist <- function(name) {
+  fulllist <- list()
+  for (i in seq_along(colnames(name))) {
+    fulllist[i] = colnames(name)[i]
+  }
+  return(fulllist)
+}
+
+glmdata1 <- function(data, cname) {
+  datamean <- dcast(data, paste(cname, "~."), mean)
+  datasd <- dcast(data, paste(cname, "~."), sd)
+  datan <- dcast(data, paste(cname, "~."), length)
+  datase <- datasd[2]/sqrt(datan[2])
+  rownames(datamean) <- datamean[,1]
+  result <- cbind(datamean, datase)
+  colnames(result) <- c(cname, 'mean', 'se')
+  return(list(result, cname))
+}
+
+glmdata2 <- function(data, rname, cname) {
+  result <- dcast(data, paste(rname, "~", cname), mean)
+  rownames(result) <- result[,1]
+  return(list(result, rname, cname))
+}
+
+glmline <- function(data, ytitle, min, max) {
+  result <- ggplot(data[[1]], aes_string(data[[2]], 'mean')) + geom_bar(stat = 'identity') +
+    geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.25) + 
+    labs(x = data[[2]], y = ytitle) + theme_bw() + 
+    theme(axis.text = element_text(size = rel(1.5)), axis.title = element_text(size = rel(1.5))) +
+    coord_cartesian(ylim=c(min,max))
+  return(result)
+}
+
+glmplot <- function(data) {
+  nr <- nrow(data[[1]])
+  result <- create.heatmap(
+  x = data[[1]][1:nr, -1],
+  xlab.label = data[[2]],
+  ylab.label = data[[3]],
+  xaxis.lab = NA,
+  yaxis.lab = NA,
+  xaxis.cex = 1.5,
+  yaxis.cex = 1.5,
+  xlab.cex = 1.5,
+  ylab.cex = 1.5,
+  style = 'Nature',
+  xaxis.fontface = 1,
+  yaxis.fontface = 1,
+  colourkey.cex = 1,
+  cluster.dimensions = 'both',
+  colour.alpha = 1,
+  cols.distance.method = "euclidean",
+  legend.cex = 1.5,
+  top.padding = 0.5,
+  grid.row = TRUE,
+  grid.col = TRUE,
+  width = 5,
+  height = 5,
+  colour.scheme = c('blue', 'white', 'red'),
+  #covariates.top = sample.covariate,
+  #covariate.legend = sample.cov.legend,
+  resolution = 600
+  )
+  return(result)
+}
+
+```
+
+Box Graph
+===
+Input {.sidebar}
+---
+```{r featurebox, echo = FALSE}
+inputPanel(
+  selectInput("condition", label = h4("Select a condition"),
+              choices = c('DMSO', 'Lapatinib', 'LapVP', 'All'),
+              multiple = FALSE)
+)
+
+datadfEdU <- reactive({
+  result <- glm.other.means
+  return(result)
+  })
+datadfHER2 <- reactive({
+  result <- glm.other.means.HER2
+  return(result)
+})
+
+condition <- reactive({
+  result <- input$condition
+  return(result)
+})
+
+datasubdfEdU <- reactive({
+  ifelse(condition() == 'All', result <- datadfEdU(), result <- subset(datadfEdU(), Treatment == condition()))
+  return(result)
+})
+
+datasubdfHER2 <- reactive({
+  ifelse(condition() == 'All', result <- datadfHER2(), result <- subset(datadfHER2(), Treatment == condition()))
+  return(result)
+})
+
+inputPanel(
+  selectInput("inputfeature", label = h4("Select a feature"),
+            choices = generatelist(glm.other.means)[c(which(sapply(glm.other.means, is.factor)))],
+            multiple = FALSE)
+)
+
+feature <- reactive(input$inputfeature)
+
+gd1EdU <- reactive({
+  result <- glmdata1(datasubdfEdU(), feature())
+  return(result)
+})
+
+gd1HER2 <- reactive({
+  result <- glmdata1(datasubdfHER2(), feature())
+  return(result)
+})
+```
+
+row
+---
+### Drug Response
+```{r, echo = FALSE}
+renderPlot({
+  p <- glmline(gd1EdU(), 'EdU_%_Total_Cells', edu_min, edu_max)
+  p
+})
+```
+
+### pHER2/HER2 Status
+```{r, echo = FALSE}
+renderPlot({
+  p <- glmline(gd1HER2(), 'pHER2/HER2_Status', her2_min, her2_max)
+  p
+})
+```
+
+HeatMap
+===
+Input {.sidebar}
+---
+```{r, echo = FALSE}
+inputPanel(
+  selectInput("inputfeature1", label = h4("Select a feature"),
+            choices = generatelist(glm.other.means)[c(which(sapply(glm.other.means, is.factor)))],
+            multiple = FALSE),
+  selectInput("inputfeature2", label = h4("Select a feature"),
+            choices = generatelist(glm.other.means)[c(which(sapply(glm.other.means, is.factor)))],
+            multiple = FALSE)
+)
+feature1 <- reactive(input$inputfeature1)
+feature2 <- reactive(input$inputfeature2)
+
+datadf2EdU <- reactive({
+  result <- glm.other.means
+  return(result)
+  })
+
+datadf2HER2 <- reactive({
+  result <- glm.other.means.HER22
+  return(result)
+  })
+
+gd2EdU <- reactive({
+  result <- glmdata2(datadf2EdU(), feature1(), feature2())
+  return(result)
+})
+
+gd2HER2 <- reactive({
+  result <- glmdata2(datadf2HER2(), feature1(), feature2())
+  return(result)
+})
+```
+
+row
+---
+### Drug Response
+```{r, echo = FALSE}
+renderPlot({
+  p <- glmplot(gd2EdU())
+  p
+})
+```
+
+### pHER2/HER2 Status
+```{r, echo = FALSE}
+renderPlot({
+  p <- glmplot(gd2HER2())
+  p
+})
+```
+
+PCA
+===
+row
+---
+### ECM 
+```{r, echo = FALSE}
+renderPlot({
+  p <- fviz_pca_ind(res.pca, label = "all", axes = c(1,2), habillage = zsc.all$Component,
+                   addEllipses=TRUE, ellipse.level=0.95, labelsize = 2)
+  p
+})
+```
+
+### Ligand
+```{r, echo = FALSE}
+renderPlot({
+  p <- fviz_pca_ind(res.pca, label = "all", axes = c(1,2), habillage = zsc.all$Ligand,
+                   addEllipses=TRUE, ellipse.level=0.95, labelsize = 2)
+  p
+})
+```
+
+row
+---
+### Treatment
+```{r, echo = FALSE}
+renderPlot({
+  p <- fviz_pca_ind(res.pca, label = "all", axes = c(1,2), habillage = zsc.all$Treatment,
+                   addEllipses=TRUE, ellipse.level=0.95, labelsize = 2)
+  p
+})
+```
+
+### Stiffness
+```{r, echo = FALSE}
+renderPlot({
+  p <- fviz_pca_ind(res.pca, label = "all", axes = c(1,2), habillage = zsc.all$Stiffness,
+                   addEllipses=TRUE, ellipse.level=0.95, labelsize = 2)
+  p
+})
+```
